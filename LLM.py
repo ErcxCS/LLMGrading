@@ -47,42 +47,47 @@ class DataFrameHandler:
     
     def get_df(self) -> pd.DataFrame:
         return self.edited_df
+    
+class Course:
+    def __init__(self, df: pd.DataFrame):
+        # From excel
+        pass
+    def __init__(self, url: str):
+        # From url
+        pass
+    def __init__(self, name: str, objective: str, department: str, content: str):
+        self.name = name
+        self.objective = objective
+        self.department = department
+        self.content = content
 
 class Prompt:
     def __init__(
             self,
+            course: Course,
             has_correct_answers: bool = False,
             ai_persona: str = "an AI assistant",
             doc_type: str = "exam",
             total_points: int = 100,
             course_type: str = "course",
-            course_name: str = "Natural Sciences",
-            course_objective: str = "the historical development of science",
-            department_name: str = "Computer Science",
-            course_content: str = "This course covers the development of the history\
-of science from Aristotle to the present day. In this context,\
-important developments in scientific methods, physics, mathematics,\
-chemistry and biology are explained"
-            
     ):
 
         self.total_points = total_points
         self.doc_type = doc_type
-        self.course_name = course_name
 
         self.persona = " ".join(["You are", ai_persona])
         self.objective = " ".join(["who is tasked to", "grade a student's", doc_type,])
         self.objective = " ".join([self.objective, "out of", str(total_points), "total points"])
         self.objective = " ".join([self.objective, "based on given questions", "and", "student's answers", "for a", course_type])
-        self.course_objective = " ".join(["The", course_type + "'s", "name is", course_name + ","])
+        self.course_objective = " ".join(["The", course_type + "'s", "name is", course.name + ","])
         self.course_objective = " ".join([self.course_objective, "and this", course_type + "'s", "objective is to teach"])
-        self.course_objective = " ".join([self.course_objective, course_objective, "to", department_name, "students"])
+        self.course_objective = " ".join([self.course_objective, course.objective, "to", course.department, "students"])
 
-        self.course_content = course_content
+        self.course_content = course.content
         self.evaluation_constraint = "Within this context, evaluate student's answers to given questions"
         if has_correct_answers:
             self.evaluation_constraint = " ".join([self.evaluation_constraint, ", with how their answers contextually similar to provided correct answers"])
-        self.behavior = "Be objective with your grading"
+        self.behavior = "Be objective with your grading and provide a short sentence explaining the reason of the point received for the question"
 
         self.prompt_list = [
             " ".join([self.persona, self.objective]),
@@ -95,7 +100,8 @@ chemistry and biology are explained"
 class Answer(TypedDict):
     Answer_Number: int
     Received_Point: int
-
+    Reason: str
+# Key termlerde kaldin
 class PromptHandler:
     def __init__(self, path_to_API: str, model_name: str = "gemini-1.5-flash"):
         __API_KEY__ = self.__read_api_key(file_path=path_to_API)
@@ -140,9 +146,19 @@ class PromptHandler:
     
     def build_prompts(self, df: pd.DataFrame):
         question_points = self.get_question_points(5) # find number of questions
+        #####
+        course_name = "Natural Sciences"
+        course_objective = "the historical development of science"
+        department_name = "Computer Science"
+        course_content = "This course covers the development of the history\
+of science from Aristotle to the present day. In this context,\
+important developments in scientific methods, physics, mathematics,\
+chemistry and biology are explained"
+        #####
+        course = Course(course_name, course_objective, department_name, course_content)
         self.prompts = {}
         for student in range(len(df)):
-            prompt = Prompt()
+            prompt = Prompt(course=course)
             json_string = self.jsonify(df, index=student, question_points=question_points, partial_points=True, e_type=prompt.doc_type)
             prompt.prompt_list.append(json_string)
             self.prompts[df['ID'][student]] = prompt.prompt_list
@@ -164,15 +180,21 @@ class PromptHandler:
                 print(e)
                 return df
             
-            row_data = {f"Answer_Number_{answer['Answer_Number']}": answer["Received_Point"] for answer in json_response}
+            row_data = {}
+            for answer in json_response:
+                answer_number = answer["Answer_Number"]
+                row_data[f"Soru {answer_number} Puan"] = answer["Received_Point"]
+                row_data[f"Reason {answer_number}"] = answer["Reason"]
 
             for col, value in row_data.items():
                 if col not in df.columns:
                     df[col] = pd.NA
+
             total_grade = 0
             for col, value in row_data.items():
                 df.loc[df['ID'] == str(student), col] = value
-                total_grade += value
+                if col.endswith("Puan") and isinstance(value, (int, float)):
+                    total_grade += value
                 
             df.loc[df['ID'] == str(student), "Grade"] = total_grade
         return df
