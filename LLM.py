@@ -1,10 +1,10 @@
 import re
-import google.generativeai as genai
+from google import genai
 import pandas as pd
 import tkinter as tk
 from tkinter import filedialog
 import json
-from typing_extensions import TypedDict, List, Dict
+from pydantic import BaseModel
 
 class FileHandler:
     def read(self):
@@ -87,7 +87,8 @@ class Prompt:
         self.evaluation_constraint = "Within this context, evaluate student's answers to given questions"
         if has_correct_answers:
             self.evaluation_constraint = " ".join([self.evaluation_constraint, ", with how their answers contextually similar to provided correct answers"])
-        self.behavior = "Be objective with your grading and provide a short sentence explaining the reason of the point received for the question"
+        reason = " and provide a short sentence explaining the reason of the point received for the question"
+        self.behavior = "Be objective with your grading" #+ reason
 
         self.prompt_list = [
             " ".join([self.persona, self.objective]),
@@ -97,20 +98,21 @@ class Prompt:
             self.behavior
         ]
 
-class Answer(TypedDict):
+class Answer(BaseModel):
     Answer_Number: int
     Received_Point: int
-    Reason: str
+    #Reason: str
+
 # Key termlerde kaldin
 class PromptHandler:
     def __init__(self, path_to_API: str, model_name: str = "gemini-1.5-flash"):
-        __API_KEY__ = self.__read_api_key(file_path=path_to_API)
-        genai.configure(api_key=__API_KEY__)
-        self.model = genai.GenerativeModel(model_name)
-        self.config = genai.GenerationConfig(
-            response_mime_type="application/json",
-            response_schema=list[Answer]
-        )
+        self.__API_KEY__ = self.__read_api_key(file_path=path_to_API)
+        self.model_name = model_name
+        self.client = genai.Client(api_key=self.__API_KEY__)
+        self.config = {
+            'response_mime_type' : 'application/json',
+            'response_schema' :  list[Answer]
+        }
 
     def __read_api_key(self, file_path: str):
         with open(file_path, "r+") as f:
@@ -151,9 +153,9 @@ class PromptHandler:
         course_objective = "the historical development of science"
         department_name = "Computer Science"
         course_content = "This course covers the development of the history\
-of science from Aristotle to the present day. In this context,\
-important developments in scientific methods, physics, mathematics,\
-chemistry and biology are explained"
+ of science from Aristotle to the present day. In this context,\
+ important developments in scientific methods, physics, mathematics,\
+ chemistry and biology are explained"
         #####
         course = Course(course_name, course_objective, department_name, course_content)
         self.prompts = {}
@@ -164,7 +166,12 @@ chemistry and biology are explained"
             self.prompts[df['ID'][student]] = prompt.prompt_list
 
     def grade(self, prompt_list: list):
-        response = self.model.generate_content(prompt_list, generation_config=self.config)
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt_list,
+            config=self.config
+        )
+        print(response.usage_metadata)
         json_response = json.loads(response.text)
         return json_response
 
@@ -175,6 +182,7 @@ chemistry and biology are explained"
         for student, prompt in self.prompts.items():
             print(f"grading: {student}")
             try:
+                print(prompt)
                 json_response = self.grade(prompt_list=prompt)
             except Exception as e:
                 print(e)
@@ -184,7 +192,7 @@ chemistry and biology are explained"
             for answer in json_response:
                 answer_number = answer["Answer_Number"]
                 row_data[f"Soru {answer_number} Puan"] = answer["Received_Point"]
-                row_data[f"Reason {answer_number}"] = answer["Reason"]
+                #row_data[f"Reason {answer_number}"] = answer["Reason"]
 
             for col, value in row_data.items():
                 if col not in df.columns:
@@ -205,7 +213,9 @@ if __name__ == "__main__":
     file_handler = FileHandler()
     df : pd.DataFrame = file_handler.read()
     df = DataFrameHandler(df).get_df()
-    prompt_handler = PromptHandler(path_to_API="./API.txt")
+    model_name = "gemini-1.5-flash"
+    model_name = "gemini-2.0-flash"
+    prompt_handler = PromptHandler(model_name=model_name ,path_to_API="./API.txt")
     prompt_handler.build_prompts(df)
     prompt_handler.grade_exam(df)
     file_handler.write(df)
