@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import filedialog
 import json
 from typing_extensions import TypedDict, List, Dict
+import time
 
 class FileHandler:
     def read(self):
@@ -87,7 +88,7 @@ class Prompt:
         self.evaluation_constraint = "Within this context, evaluate student's answers to given questions"
         if has_correct_answers:
             self.evaluation_constraint = " ".join([self.evaluation_constraint, ", with how their answers contextually similar to provided correct answers"])
-        self.behavior = "Be objective with your grading" #+ "and provide a short sentence explaining the reason of the point received for the question"
+        self.behavior = "Be objective with your grading" + " and provide a short sentence explaining the reason of the point received for the question"
 
         self.prompt_list = [
             " ".join([self.persona, self.objective]),
@@ -100,7 +101,7 @@ class Prompt:
 class Answer(TypedDict):
     Answer_Number: int
     Received_Point: int
-    #Reason: str
+    Reason: str
 # Key termlerde kaldin
 class PromptHandler:
     def __init__(self, path_to_API: str, model_name: str = "gemini-1.5-flash"):
@@ -167,11 +168,14 @@ class PromptHandler:
 
     def grade(self, prompt_list: list):
         response = self.model.generate_content(prompt_list, generation_config=self.config)
+        time.sleep(5)
         print(response.usage_metadata)
+        print(response)
         json_response = json.loads(response.text)
         return json_response
 
     def grade_exam(self, df: pd.DataFrame):
+        error_count = 0
         if "Grade" not in df.columns:
             df["Grade"] = pd.NA 
 
@@ -180,14 +184,18 @@ class PromptHandler:
             try:
                 json_response = self.grade(prompt_list=prompt)
             except Exception as e:
+                error_count += 1
                 print(e)
-                return df
+                if error_count == 3:
+                    return df
+                time.sleep(15)
+                #return df
             
             row_data = {}
             for answer in json_response:
                 answer_number = answer["Answer_Number"]
                 row_data[f"Soru {answer_number} Puan"] = answer["Received_Point"]
-                #row_data[f"Reason {answer_number}"] = answer["Reason"]
+                row_data[f"Reason {answer_number}"] = answer["Reason"]
 
             for col, value in row_data.items():
                 if col not in df.columns:
@@ -200,6 +208,7 @@ class PromptHandler:
                     total_grade += value
                 
             df.loc[df['ID'] == str(student), "Grade"] = total_grade
+            
         return df
 
 
